@@ -4643,6 +4643,40 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     {m.mediaType === "audio" && m.mediaData?.label && (
                         <button onClick={() => { setVoiceTextIds(prev => { const next = new Set(prev); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); return next; }); setActiveMessageId(null); }} className="ctx-menu-btn">转文字</button>
                     )}
+                    {m.role === "assistant" && m.mediaType !== "audio" && m.content && (
+                        <button onClick={() => {
+                            const labelText = m.content;
+                            const patch = {
+                                mediaType: "audio" as const,
+                                mediaData: {
+                                    ...m.mediaData,
+                                    label: labelText,
+                                    voiceDuration: Math.max(2, Math.ceil(labelText.length / 4))
+                                }
+                            };
+                            updateChatMessage(storedMessageId, patch);
+                            setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, ...patch } : msg));
+                            setActiveMessageId(null);
+                        }} className="ctx-menu-btn">转语音</button>
+                    )}
+                    {m.mediaType === "audio" && m.mediaUrl && (
+                        <button onClick={async () => {
+                            setActiveMessageId(null);
+                            try {
+                                const { downloadUrl } = await import("@/lib/download-utils");
+                                let url = m.mediaUrl;
+                                if (url.startsWith("media-store://")) {
+                                    const { loadMediaObjectUrl } = await import("@/lib/media-cache-storage");
+                                    const objUrl = await loadMediaObjectUrl(url);
+                                    if (objUrl) url = objUrl;
+                                }
+                                const filename = `${m.mediaData?.label || "语音"}.mp3`;
+                                await downloadUrl(url, filename);
+                            } catch (err) {
+                                showChatToast("下载失败");
+                            }
+                        }} className="ctx-menu-btn">下载音频</button>
+                    )}
                     {m.role === "user" && (
                         <button onClick={() => handleRetractMessage(storedMessageId)} className="ctx-menu-btn">撤回消息</button>
                     )}
