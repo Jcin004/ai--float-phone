@@ -388,6 +388,23 @@ function normalizeFishCue(inner: string): string {
     return "";
 }
 
+/**
+ * 合并相邻 cue：连写的 [a][b][c]（中间只有空格）压到最多 2 个。
+ * 规则：先去相邻重复；≤2 个原样保留；3+ 时——有停顿 cue 就留「停顿 + 最后一个情绪」，没有就留前两个情绪。
+ */
+function collapseAdjacentCues(s: string): string {
+    return s.replace(/\[[^\]]+\](?:\s*\[[^\]]+\])+/g, (run) => {
+        const cues = run.match(/\[[^\]]+\]/g) || [];
+        const dedup = cues.filter((c, i) => i === 0 || c.toLowerCase() !== cues[i - 1].toLowerCase());
+        if (dedup.length <= 2) return dedup.join(" ");
+        const isPause = (c: string) => /^\[(pause|long pause)\]$/i.test(c);
+        const pause = dedup.find(c => /^\[long pause\]$/i.test(c)) || dedup.find(isPause);
+        const emotions = dedup.filter(c => !isPause(c));
+        if (pause) return emotions.length ? `${pause} ${emotions[emotions.length - 1]}` : pause;
+        return `${emotions[0]} ${emotions[1]}`;
+    });
+}
+
 function cleanTextForTtsFish(raw: string): string {
     if (!raw) return "";
     let text = raw
@@ -405,6 +422,7 @@ function cleanTextForTtsFish(raw: string): string {
         .replace(/\s+/g, " ")
         .trim();
 
+    text = collapseAdjacentCues(text);
     return text;
 }
 
@@ -430,8 +448,9 @@ async function synthesizeFishAudio(text: string, config: VoiceApiConfig, emotion
         normalize: true,
     };
 
-    // 语速配置，支持在设置里拉动的语速
-    const speed = typeof config.speechSpeed === "number" && config.speechSpeed > 0 ? config.speechSpeed : 1.0;
+    // 语速配置：角色或设置配了就用配的；没配则默认 0.9（比 1.0 慢一档）
+    // 鱼声默认读得偏赶，稍微放慢更像真人说话、段落停顿也更听得出。
+    const speed = typeof config.speechSpeed === "number" && config.speechSpeed > 0 ? config.speechSpeed : 0.9;
     payload.prosody = { speed: Math.max(0.5, Math.min(2.0, speed)) };
 
     // ⚠️ 核心修复：不直接向 api.fish.audio 发送请求以规避 CORS，
