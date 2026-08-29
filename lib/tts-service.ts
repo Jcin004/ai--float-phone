@@ -43,6 +43,10 @@ export async function synthesizeSpeech(
         return synthesizeOpenAI(text, voiceConfig);
     }
 
+    if (provider === "FishAudio") {
+        return synthesizeFishAudio(text, voiceConfig, options?.emotion);
+    }
+
     return null;
 }
 
@@ -168,6 +172,130 @@ async function synthesizeOpenAI(text: string, config: VoiceApiConfig): Promise<B
     if (!response.ok) {
         const errText = await response.text().catch(() => "");
         throw new Error(`OpenAI TTS 请求失败 (${response.status}): ${errText}`);
+    }
+
+    const blob = await response.blob();
+    return new Blob([await blob.arrayBuffer()], { type: "audio/mpeg" });
+}
+
+// ── Fish Audio TTS ───────────────────────────────────
+
+// 鱼声 S2.1 官方可靠支持的标签集（来自 app UI 调色板），超出此范围的标签容易造成平读或念错
+const FISH_SUPPORTED_CUES = new Set([
+    'angry', 'sad', 'embarrassed', 'emphasis', 'whispering', 'soft', 'breathy', 'excited',
+    'laughing', 'chuckling', 'moaning', 'clear throat', 'sobbing', 'crying loudly',
+    'sighing', 'panting', 'groaning', 'crowd laughing', 'background laughter', 'audience laughing',
+    'pause', 'long pause',
+]);
+
+const FISH_CUE_SYNONYMS: Record<string, string> = {
+    'break': 'pause', 'short pause': 'pause',
+    'long-break': 'long pause', 'longbreak': 'long pause', 'long break': 'long pause',
+    happy: 'excited', joyful: 'excited', delighted: 'excited', cheerful: 'excited', glad: 'excited',
+    smug: 'excited', proud: 'excited', gleeful: 'excited', playful: 'excited', teasing: 'excited',
+    confident: 'excited', surprised: 'excited', amazed: 'excited', curious: 'excited', hopeful: 'excited',
+    enthusiastic: 'excited', eager: 'excited',
+    annoyed: 'angry', irritated: 'angry', frustrated: 'angry', mad: 'angry', furious: 'angry', grumpy: 'angry',
+    unhappy: 'sad', disappointed: 'sad', hurt: 'sad', depressed: 'sad', pleading: 'sad', sulking: 'sad', lonely: 'sad', regretful: 'sad',
+    shy: 'embarrassed', bashful: 'embarrassed', awkward: 'embarrassed', flustered: 'embarrassed',
+    'soft tone': 'soft', gentle: 'soft', tender: 'soft', warm: 'soft', calm: 'soft', soothing: 'soft',
+    tired: 'soft', sleepy: 'soft', relaxed: 'soft', sincere: 'soft',
+    nervous: 'breathy', anxious: 'breathy', scared: 'breathy', fearful: 'breathy', worried: 'breathy', timid: 'breathy',
+    whisper: 'whispering', hushed: 'whispering', murmuring: 'whispering',
+    emphatic: 'emphasis', stressing: 'emphasis',
+    laugh: 'laughing', laughs: 'laughing',
+    giggle: 'chuckling', giggling: 'chuckling', giggles: 'chuckling', chuckle: 'chuckling', chuckles: 'chuckling',
+    sigh: 'sighing', sighs: 'sighing',
+    sob: 'sobbing', sobs: 'sobbing', crying: 'crying loudly', cry: 'crying loudly',
+    groan: 'groaning', groans: 'groaning',
+    pant: 'panting', pants: 'panting', gasp: 'panting', gasps: 'panting', gasping: 'panting', 'out of breath': 'panting',
+    moan: 'moaning', moans: 'moaning',
+    'clears throat': 'clear throat', ahem: 'clear throat', cough: 'clear throat', coughs: 'clear throat',
+};
+
+const FISH_EMOTION_MAP: Record<string, string> = {
+    happy: 'excited',
+    sad: 'sad',
+    angry: 'angry',
+    fearful: 'breathy',
+    disgusted: 'angry',
+    surprised: 'excited',
+    calm: 'soft',
+};
+
+function normalizeFishCue(inner: string): string {
+    const key = (inner || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!key) return '';
+    if (FISH_SUPPORTED_CUES.has(key)) return key;
+    if (FISH_CUE_SYNONYMS[key]) return FISH_CUE_SYNONYMS[key];
+    for (const [syn, canon] of Object.entries(FISH_CUE_SYNONYMS)) {
+        if (key.includes(syn)) return canon;
+    }
+    for (const canon of FISH_SUPPORTED_CUES) {
+        if (key.includes(canon)) return canon;
+    }
+    return '';
+}
+
+function cleanTextForTtsFish(raw: string): string {
+    if (!raw) return '';
+    let text = raw
+        .replace(/\[\[.*?\]\]/g, '')                 // 去除系统标记 [[..]]
+        .replace(/%%BILINGUAL%%[\s\S]*/i, '')        // 移除双语分割线
+        .replace(/（[^）]{0,48}）/g, '')              // 去除中文圆括号舞台指示
+        .replace(/<#\s*[\d.]+\s*#>/g, '')            // 过滤 MiniMax 停顿标记
+        .replace(/\(([^)]{1,40})\)/g, '[$1]')        // 圆括号转方括号，便于归一
+        .replace(/\n{2,}/g, ' [long pause] ')        // 换行替换为停顿
+        .replace(/\n+/g, ' [pause] ')
+        .replace(/\[([^\[\]]{1,40})\]/g, (_m, inner: string) => {
+            const canon = normalizeFishCue(inner);
+            return canon ? `[${canon}]` : '';
+        })
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return text;
+}
+
+async function synthesizeFishAudio(text: string, config: VoiceApiConfig, emotion?: string): Promise<Blob | null> {
+    if (!config.apiKey) throw new Error("鱼声 (Fish Audio) API Key 未配置");
+
+    const baseUrl = (config.baseUrl || "https://api.fish.audio/v1").replace(/\/$/, "");
+    let spoken = cleanTextForTtsFish(text);
+
+    // 兜底：如果外部传了 emotion，且文中没有方括号 cue，前置一个情绪
+    const hasInlineCue = spoken.includes('[') && spoken.includes(']');
+    const fishEmotion = emotion ? FISH_EMOTION_MAP[emotion.toLowerCase()] : undefined;
+    if (fishEmotion && !hasInlineCue) {
+        spoken = `[${fishEmotion}] ${spoken}`;
+    }
+
+    if (!spoken.trim()) return null;
+
+    const payload: Record<string, any> = {
+        text: spoken,
+        reference_id: config.defaultVoice || undefined,
+        format: "mp3",
+        normalize: true,
+    };
+
+    // 语速配置，支持在设置里拉动的语速
+    const speed = typeof config.speechSpeed === "number" && config.speechSpeed > 0 ? config.speechSpeed : 1.0;
+    payload.prosody = { speed: Math.max(0.5, Math.min(2.0, speed)) };
+
+    const response = await fetchWithTimeout(`${baseUrl}/tts`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "Content-Type": "application/json",
+            model: config.model || "s2.1-pro-free",
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`鱼声 TTS 请求失败 (${response.status}): ${errText}`);
     }
 
     const blob = await response.blob();
