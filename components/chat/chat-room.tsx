@@ -61,6 +61,7 @@ import { approveMemoryWriteRequest } from "@/lib/tool-executor";
 import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
 import { formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
+import { stripFishCuesForDisplay } from "@/lib/tts-service";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 import { creditWalletBalance, payWithWalletBalance } from "@/lib/wallet-storage";
 import { loadDeliveredShoppingGifts, type ShoppingGiftCandidate } from "@/lib/shopping-gift-utils";
@@ -5854,7 +5855,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     {msg.role !== "user" && <div className="w-[40px] shrink-0" />}
                                     <div className="voice-msg-text-bubble">
                                         <BilingualTextBlock
-                                            text={msg.displayProjected ? (renderMsg.mediaData?.label || "") : renderDisplayText(renderMsg.mediaData?.label || "", msg.role === "user" ? 1 : 2, false)}
+                                            text={stripFishCuesForDisplay(msg.displayProjected ? (renderMsg.mediaData?.label || "") : renderDisplayText(renderMsg.mediaData?.label || "", msg.role === "user" ? 1 : 2, false))}
                                             mode="markdown"
                                             defaultExpanded={session.collapseBilingualTranslation !== false ? false : true}
                                         />
