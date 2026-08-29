@@ -362,6 +362,21 @@ const FISH_CUE_SYNONYMS: Record<string, string> = {
     pant: "panting", pants: "panting", gasp: "panting", gasps: "panting", gasping: "panting", "out of breath": "panting",
     moan: "moaning", moans: "moaning",
     "clears throat": "clear throat", ahem: "clear throat", cough: "clear throat", coughs: "clear throat",
+    // 中文舞台指示（（笑）（叹气）等）→ 官方标签。长词在前，避免「轻笑」被「笑」抢先命中。
+    "轻笑": "chuckling", "偷笑": "chuckling", "嘿嘿": "chuckling", "噗嗤": "chuckling",
+    "叹了口气": "sighing", "叹气": "sighing", "深呼吸": "sighing",
+    "大哭": "crying loudly", "抽泣": "sobbing", "啜泣": "sobbing", "哭": "crying loudly",
+    "小声": "whispering", "耳语": "whispering", "悄悄": "whispering",
+    "温柔": "soft", "轻柔": "soft", "疲惫": "soft", "平静": "soft",
+    "紧张": "breathy", "害怕": "breathy", "颤抖": "breathy",
+    "生气": "angry", "愤怒": "angry", "恼火": "angry",
+    "难过": "sad", "委屈": "sad", "失落": "sad",
+    "兴奋": "excited", "开心": "excited", "高兴": "excited", "得意": "excited", "惊喜": "excited",
+    "害羞": "embarrassed", "尴尬": "embarrassed",
+    "沉默": "long pause", "顿了顿": "pause", "停顿": "pause",
+    "清嗓": "clear throat", "咳嗽": "clear throat",
+    "喘息": "panting", "喘": "panting",
+    "呻吟": "moaning", "闷哼": "groaning", "哀嚎": "groaning",
 };
 
 const FISH_EMOTION_MAP: Record<string, string> = {
@@ -405,12 +420,51 @@ function collapseAdjacentCues(s: string): string {
     });
 }
 
+/**
+ * 鱼声语音演出指南：注入给 LLM 的提示词片段，教 AI 在台词里直接写鱼声官方
+ * 方括号 cue（[laughing]/[sighing]/[soft]…），并跟拟声字，让语音有真实笑声哭声。
+ * 用法：把返回值放进预设/世界书，或由调用方在角色绑定鱼声配置时注入 system 段。
+ */
+export function getFishVoiceActingGuide(): string {
+    return `### 语音演出规范（你的台词会被转成真实语音）
+
+**1. 用半角英文方括号 cue 控制情绪，只准用这些官方标签：**
+- 情绪：[excited]（开心/兴奋/得意）、[angry]、[sad]（难过/委屈）、[embarrassed]（害羞）、[soft]（温柔/疲惫）、[breathy]（紧张/气声）、[whispering]（悄悄话）、[emphasis]（强调）
+- 声响：[laughing]（大笑）、[chuckling]（轻笑）、[sighing]（叹气）、[sobbing]（抽泣）、[crying loudly]（大哭）、[groaning]、[panting]、[moaning]、[clear throat]
+- 停顿：[pause]（短停）、[long pause]（长停）
+
+**2. 声响标签后面必须跟拟声字**，否则发不出声音：写 \`[laughing] 哈哈哈\`、\`[sighing] 唉……\`、\`[sobbing] 呜呜\`，不要只写光秃秃的标签。
+
+**3. cue 放在情绪真正起来的那个点**（通常在逗号之间的句中），不要每句开头机械地放；短句（三五 个字）不放。一处最多 1 个 cue。
+例：\`你终于回消息了，[excited] 我可等你半天了！今天上班差点迟到，[sighing] 地铁挤得跟沙丁鱼罐头似的。\`
+
+**4. 禁止：** 圆括号 (laughs)、中文标签 [轻声]、全角【】、MiniMax 的 <#0.5#> 停顿——这些都会被丢弃或念错。`;
+}
+
+/**
+ * 从「要显示给用户」的文本里剥掉鱼声演出标记：方括号 cue + 已被识别为 cue 的
+ * 圆括号（(laughs) 等）。普通括注（[重要]/(顺便)）原样保留，不误伤。
+ * 用于聊天气泡 / 转文字面板，免得用户看到一堆 [laughing]、(sighs)。
+ */
+export function stripFishCuesForDisplay(text?: string | null): string {
+    if (!text) return "";
+    return text
+        .replace(/<#\s*[\d.]+\s*#>/g, "")
+        .replace(/\[([^\[\]]{1,40})\]/g, (m, inner: string) => (normalizeFishCue(inner) ? "" : m))
+        .replace(/\(([^)]{1,40})\)/g, (m, inner: string) => (normalizeFishCue(inner) ? "" : m))
+        .replace(/（([^）]{1,40})）/g, (m, inner: string) => (normalizeFishCue(inner) ? "" : m))
+        .replace(/[ \t]{2,}/g, " ")
+        .replace(/[ \t]+([，。！？、；：,.!?…])/g, "$1")
+        .replace(/[ \t]*\n[ \t]*/g, "\n")
+        .trim();
+}
+
 function cleanTextForTtsFish(raw: string): string {
     if (!raw) return "";
     let text = raw
         .replace(/\[\[.*?\]\]/g, "")                 // 去除系统标记 [[..]]
         .replace(/%%BILINGUAL%%[\s\S]*/i, "")        // 移除双语分割线
-        .replace(/（[^）]{0,48}）/g, "")              // 去除中文圆括号舞台指示
+        .replace(/（([^）]{0,48})）/g, "[$1]")        // 中文圆括号转方括号：认得出的（笑）（叹气）变情绪标签，认不出的在下方归一一步被安全丢弃
         .replace(/<#\s*[\d.]+\s*#>/g, "")            // 过滤 MiniMax 停顿标记
         .replace(/\(([^)]{1,40})\)/g, "[$1]")        // 圆括号转方括号，便于归一
         .replace(/\n{2,}/g, " [long pause] ")        // 换行替换为停顿

@@ -20,6 +20,7 @@ import remarkBreaks from "remark-breaks";
 import { createPortal } from "react-dom";
 import { Blocks, Maximize2, ReceiptText } from "lucide-react";
 import { retryChatGeneratedImage } from "@/lib/generated-image-retry";
+import { stripFishCuesForDisplay } from "@/lib/tts-service";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { ScanPayCard } from "@/components/chat/scan-pay-card";
 import { payWithWalletBalance } from "@/lib/wallet-storage";
@@ -191,13 +192,15 @@ function splitChatContent(text: string): { type: "md" | "html"; content: string 
 }
 
 export function normalizeTextBubbleContent(content: string): string {
-    const cleaned = content
+    // 鱼声演出标记（[laughing]/(sighs)/（笑） 等被识别为 cue 的括号）从显示文本剥离，
+    // 只删可识别的 cue 词，普通括注（[重要]/(顺便)）原样保留。
+    const cleaned = stripFishCuesForDisplay(content
         .replace(/\[音乐(?:分享)?(?:[：:][^\]]*)?\]/g, "")
         .replace(/\[[^\]]+拍了拍[^\]]+\]/g, "")
         .replace(/\[[^\]]*?(?:获取指令|获取工具)[:：][^\]]*\]/g, "")
         .replace(/\[[^\]]*?(?:执行动作|工具调用)[:：][^\]]*?[（(][\s\S]*?[)）]\]/g, "")
         .replace(/\n{3,}/g, "\n\n")
-        .trim();
+        .trim());
     // 只剩零宽字符/BOM 等不可见内容时按空处理，否则会渲染出一个空气泡
     //（也让历史脏数据在显示层直接被隐藏）
     return isInvisibleOrWhitespaceOnly(cleaned) ? "" : cleaned;

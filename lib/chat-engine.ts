@@ -69,11 +69,13 @@ import { loadAllTracks } from "./music-storage";
 import { getActiveAppTags } from "./content-tag-utils";
 import { isNeteaseConfigured, getUserPlaylists, getPlaylistTracks, checkLoginStatus, loadMusicApiConfig } from "./music-service";
 import { buildCalendarScheduleMarker, getCurrentCalendarScheduleForPrompt } from "./calendar-storage";
+// 占位：保持 import 区结构稳定
 import { getWeekStartIso } from "./calendar-utils";
 import { buildCharacterTimeContext } from "./character-time";
 import { getPromptTimestampOptionsForTimeContext } from "./prompt-time";
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
+import { resolveVoiceConfig, getFishVoiceActingGuide } from "./tts-service";
 import { getInternalCapability, getInternalCapabilitySubToolDefinitions } from "./internal-capability-storage";
 import { isMediaStoreRef, loadMediaBlob } from "./media-cache-storage";
 import {
@@ -1950,6 +1952,17 @@ export async function buildChatPromptMessages(
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,
     });
+    // 鱼声演出指南：角色绑定了鱼声 (FishAudio) 语音配置时才注入，教 AI 在台词里
+    // 直接写鱼声官方方括号 cue（[laughing]/[sighing]/[soft]…）。MiniMax/OpenAI 角色不受影响。
+    if (!promptProfile && resolvedAppId === "chat") {
+        const voiceCfg = resolveVoiceConfig(character.id, resolvedAppId);
+        if (voiceCfg?.provider === "FishAudio") {
+            llmMessages.push({
+                role: "system",
+                content: getFishVoiceActingGuide(),
+            });
+        }
+    }
     if (promptProfile?.output === "plain_text") {
         llmMessages.push({
             role: "system",
