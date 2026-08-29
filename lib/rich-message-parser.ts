@@ -244,8 +244,12 @@ const RICH_PATTERNS: {
         },
     },
     {
-        // [语音条:文字内容] — voice message
-        regex: new RegExp(`\\[语音条${C}([^\\]]+)\\]`),
+        // [语音条:文字内容] — voice message。
+        // 台词里允许嵌套一层方括号（鱼声演出 cue [laughing]/[soft] 等）：
+        // 用「非括号字符 或 一层完整内括号」的平衡匹配——既不会在 cue 的 ] 处
+        // 提前截断（旧版 [^\]]+ 的 bug，残骸 [breathy 漏进正文），也不会贪婪吞掉
+        // 同一行后面的其它富媒体标签（纯贪婪 .+ 的隐患，如 [语音条:你好][照片:风景]）。
+        regex: new RegExp(`\\[语音条${C}((?:[^\\[\\]]|\\[[^\\[\\]]*\\])+)\\]`),
         build: (m) => ({
             content: "",
             mediaType: "audio" as const,
