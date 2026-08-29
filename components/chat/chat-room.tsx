@@ -4128,7 +4128,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setEditingResponseContent("");
         setEditingMessageId(msg.id);
         // 语音条的文字存在 mediaData.label 里，content 是空的
-        setEditingContent(msg.mediaType === "audio" ? (msg.mediaData?.label || msg.content) : msg.content);
+        // ⚠️ 核心修复：如果是语音消息，并且存在原始带情绪词的 rawResponseText，编辑时直接还原展示情绪词
+        setEditingContent(msg.mediaType === "audio" ? (msg.rawResponseText || msg.mediaData?.label || msg.content) : msg.content);
         setActiveMessageId(null);
     };
 
@@ -4147,10 +4148,34 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             : applyEditTextRegex(editingContent.trim(), placement, false);
         if (originalMessage?.mediaType === "audio") {
             // 语音条的显示文字和 AI 上下文都读 mediaData.label，改 content 不生效；
-            // synthesizedFromText 保留旧值，AI 语音会因文字不一致自动重新合成
+            // ⚠️ 核心修复：编辑保存后，清除旧的合成音频缓存，并且把 rawResponseText 更新为你新编辑的带情绪标签内容。
+            // 这样系统检测到音频为空时，会自动根据新写的带有方括号情绪词重新调用鱼声进行高品质演绎！
+            const { deleteMediaRef } = require("@/lib/media-cache-storage");
+            if (originalMessage.mediaUrl) {
+                deleteMediaRef(originalMessage.mediaUrl).catch(() => {});
+            }
             const nextMediaData = { ...originalMessage.mediaData, label: nextContent };
+            
+            // 写入更新
+            editChatMessage(editingMessageId, ""); // 清空 content 确保界面显示安全
             updateMessageMediaData(editingMessageId, nextMediaData);
-            setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, mediaData: nextMediaData } : m));
+            
+            // 使用底层 editChatMessage 机制同步存入 rawResponseText 保持编辑轨
+            const { editChatMessageRawResponseText } = require("@/lib/chat-storage");
+            if (typeof editChatMessageRawResponseText === "function") {
+                editChatMessageRawResponseText(editingMessageId, nextContent);
+            }
+            
+            // 强制将 mediaUrl 设为空，触发系统重新走 synthesizeSpeech 链路
+            const patch = {
+                mediaUrl: "",
+                rawResponseText: nextContent,
+                mediaData: nextMediaData,
+                content: ""
+            };
+            updateChatMessage(editingMessageId, patch);
+            
+            setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, ...patch } : m));
         } else {
             editChatMessage(editingMessageId, nextContent);
             setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, content: nextContent } : m));
@@ -4641,7 +4666,26 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         {m.role === "assistant" && (m.rawResponseText || m.editableResponseText) ? "编辑回复" : "编辑"}
                     </button>
                     {m.mediaType === "audio" && m.mediaData?.label && (
-                        <button onClick={() => { setVoiceTextIds(prev => { const next = new Set(prev); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); return next; }); setActiveMessageId(null); }} className="ctx-menu-btn">转文字</button>
+                        <>
+                            <button onClick={() => { setVoiceTextIds(prev => { const next = new Set(prev); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); return next; }); setActiveMessageId(null); }} className="ctx-menu-btn">转文字</button>
+                            <button onClick={async () => {
+                                // ⚠️ 核心功能：点击一键重新合成语音（重新转语音，利用 Flow-Matching 算法的随机性换个语气）
+                                setActiveMessageId(null);
+                                showChatToast("正在重新合成语音...");
+                                try {
+                                    const { deleteMediaRef } = await import("@/lib/media-cache-storage");
+                                    if (m.mediaUrl) {
+                                        await deleteMediaRef(m.mediaUrl);
+                                    }
+                                    const patch = { mediaUrl: "" };
+                                    updateChatMessage(storedMessageId, patch);
+                                    setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, ...patch } : msg));
+                                    showChatToast("已重置，播放时将重新生成");
+                                } catch (err) {
+                                    showChatToast("重置失败");
+                                }
+                            }} className="ctx-menu-btn">重合语音</button>
+                        </>
                     )}
                     {m.role === "assistant" && m.mediaType !== "audio" && m.content && (
                         <button onClick={() => {
