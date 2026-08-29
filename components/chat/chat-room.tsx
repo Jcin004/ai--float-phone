@@ -4128,8 +4128,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setEditingResponseContent("");
         setEditingMessageId(msg.id);
         // 语音条的文字存在 mediaData.label 里，content 是空的
-        // ⚠️ 核心修复：如果是语音消息，并且存在原始带情绪词的 rawResponseText，编辑时直接还原展示情绪词
-        setEditingContent(msg.mediaType === "audio" ? (msg.rawResponseText || msg.mediaData?.label || msg.content) : msg.content);
+        setEditingContent(msg.mediaType === "audio" ? (msg.mediaData?.label || msg.content) : msg.content);
         setActiveMessageId(null);
     };
 
@@ -4148,34 +4147,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             : applyEditTextRegex(editingContent.trim(), placement, false);
         if (originalMessage?.mediaType === "audio") {
             // 语音条的显示文字和 AI 上下文都读 mediaData.label，改 content 不生效；
-            // ⚠️ 核心修复：编辑保存后，清除旧的合成音频缓存，并且把 rawResponseText 更新为你新编辑的带情绪标签内容。
-            // 这样系统检测到音频为空时，会自动根据新写的带有方括号情绪词重新调用鱼声进行高品质演绎！
-            const { deleteMediaRef } = require("@/lib/media-cache-storage");
-            if (originalMessage.mediaUrl) {
-                deleteMediaRef(originalMessage.mediaUrl).catch(() => {});
-            }
+            // synthesizedFromText 保留旧值，AI 语音会因文字不一致自动重新合成
             const nextMediaData = { ...originalMessage.mediaData, label: nextContent };
-            
-            // 写入更新
-            editChatMessage(editingMessageId, ""); // 清空 content 确保界面显示安全
             updateMessageMediaData(editingMessageId, nextMediaData);
-            
-            // 使用底层 editChatMessage 机制同步存入 rawResponseText 保持编辑轨
-            const { editChatMessageRawResponseText } = require("@/lib/chat-storage");
-            if (typeof editChatMessageRawResponseText === "function") {
-                editChatMessageRawResponseText(editingMessageId, nextContent);
-            }
-            
-            // 强制将 mediaUrl 设为空，触发系统重新走 synthesizeSpeech 链路
-            const patch = {
-                mediaUrl: "",
-                rawResponseText: nextContent,
-                mediaData: nextMediaData,
-                content: ""
-            };
-            updateChatMessage(editingMessageId, patch);
-            
-            setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, ...patch } : m));
+            setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, mediaData: nextMediaData } : m));
         } else {
             editChatMessage(editingMessageId, nextContent);
             setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, content: nextContent } : m));
@@ -4257,14 +4232,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             setEditingResponseRoundId(msg.responseRoundId);
             setEditingResponseContent(msg.editableResponseText);
             setActiveMessageId(null);
-            return;
-        }
-        // ⚠️ 核心修复：如果是语音消息，并且存在原始带情绪词的 rawResponseText，
-        // 我们应该直接走 handleEditMessageStart(msg) 来处理（因为语音消息由于 mediaType="audio"，
-        // 我们已经在 handleEditMessageStart 里写好了完美的 rawResponseText 还原逻辑，并且可以触发
-        // handleEditMessageSave 的音频自动覆盖重置流程！）。
-        if (msg.mediaType === "audio" && msg.rawResponseText) {
-            handleEditMessageStart(msg);
             return;
         }
         if (!msg.responseBatchId || !msg.rawResponseText) {
