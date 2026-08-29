@@ -4259,6 +4259,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             setActiveMessageId(null);
             return;
         }
+        // ⚠️ 核心修复：如果是语音消息，并且存在原始带情绪词的 rawResponseText，
+        // 我们应该直接走 handleEditMessageStart(msg) 来处理（因为语音消息由于 mediaType="audio"，
+        // 我们已经在 handleEditMessageStart 里写好了完美的 rawResponseText 还原逻辑，并且可以触发
+        // handleEditMessageSave 的音频自动覆盖重置流程！）。
+        if (msg.mediaType === "audio" && msg.rawResponseText) {
+            handleEditMessageStart(msg);
+            return;
+        }
         if (!msg.responseBatchId || !msg.rawResponseText) {
             handleEditMessageStart(msg);
             return;
