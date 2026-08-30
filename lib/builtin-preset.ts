@@ -60,6 +60,7 @@ export function createBuiltinPreset(): PresetConfig {
             { identifier: "chat_idle_reconnect", enabled: true },
             { identifier: "chat_period_care", enabled: true },
             { identifier: "chat_voice_format", enabled: true },
+            { identifier: "fish_voice_acting_guide", enabled: false },
             { identifier: "chat_video_format", enabled: true },
             { identifier: "moments_post", enabled: true },
             { identifier: "moments_comment", enabled: true },
@@ -603,6 +604,7 @@ export function createBuiltinPreset(): PresetConfig {
                     "- 严禁输出时间戳或时间标签（系统会自动附加）",
                     "- 措辞符合通话节奏：短句、口头禅、必要时穿插「嗯」「对啊」「然后呢」等口语词",
                     "- 必须符合 {{char}} 当下的心情、所处时段和情境",
+                    "【语音引擎说明】语音通话走 MiniMax 等通用 TTS：任何方括号标签（如 [laughing]、[breathy]）都会被一字不漏读出来，严禁输出。方括号情绪标签只适用于微信语音条+鱼声引擎的组合，用法见「鱼声语音演出指南」条目。本条目与鱼声指南不冲突：通话场景听本条目，语音条场景听鱼声指南。",
                     "",
                     "{{chatBilingualInstruction}}",
                     "",
@@ -615,6 +617,19 @@ export function createBuiltinPreset(): PresetConfig {
                 injection_depth: 0,
                 enabled: true,
                 tags: ["chat", "voice"],
+            },
+            {
+                identifier: "fish_voice_acting_guide",
+                name: "▸ 鱼声语音演出指南",
+                role: "system",
+                // 内容为宏：角色绑定鱼声 (FishAudio) 时由 chat-engine 填充演出指南全文；
+                // 未绑鱼声时宏为空、条目自动不注入。默认关闭——开启后代码兜底注入停用，
+                // 始终只有一份指南生效。想自定义演出风格可直接改写本条目内容。
+                content: "{{fishVoiceActingGuide}}",
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: false,
+                tags: ["chat", "text"],
             },
             {
                 identifier: "chat_video_format",

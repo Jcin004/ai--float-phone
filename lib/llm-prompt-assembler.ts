@@ -88,6 +88,7 @@ export interface AssemblerInput {
     groupTools?: string;                     // formatted tool definitions for {{groupTools}} macro (group chat)
     customAppRichMediaDirectives?: string;   // formatted custom app rich-media directives
     chatBilingualInstruction?: string;       // session-specific bilingual output rule for {{chatBilingualInstruction}}
+    fishVoiceActingGuide?: string;           // fish-audio acting guide for {{fishVoiceActingGuide}} macro (empty unless character bound to FishAudio)
     statusRegionSection?: string;            // {{statusRegionSection}} — 状态区章节（native 原文 / 空 / 自定义契约）
     statusRegionExampleLine?: string;        // {{statusRegionExampleLine}} — 主动消息输出示例中的状态区行
     statusRegionComposition?: string;        // {{statusRegionComposition}} — 文字聊天模式【输出构成】行
@@ -681,6 +682,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
         engine.groupTools = input.groupTools ?? "";
         engine.customAppRichMediaDirectives = input.customAppRichMediaDirectives ?? "";
         engine.chatBilingualInstruction = input.chatBilingualInstruction ?? "";
+        engine.fishVoiceActingGuide = input.fishVoiceActingGuide ?? "";
         engine.statusRegionSection = input.statusRegionSection ?? "";
         engine.statusRegionExampleLine = input.statusRegionExampleLine ?? "";
         engine.statusRegionComposition = input.statusRegionComposition ?? "";
@@ -1851,6 +1853,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
         engine.groupTools = input.groupTools ?? "";
         engine.groupRoster = input.groupRoster ?? "";
         engine.chatBilingualInstruction = input.chatBilingualInstruction ?? "";
+        engine.fishVoiceActingGuide = input.fishVoiceActingGuide ?? "";
         engine.statusRegionSection = input.statusRegionSection ?? "";
         engine.statusRegionExampleLine = input.statusRegionExampleLine ?? "";
         engine.statusRegionComposition = input.statusRegionComposition ?? "";

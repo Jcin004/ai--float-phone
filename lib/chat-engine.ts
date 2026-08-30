@@ -1857,6 +1857,20 @@ export async function buildChatPromptMessages(
     const toolsEnabled = enabledTools.length > 0
         && (options?.forceEnableTools === true || presetIncludesToolsMacro(preset, resolvedAppId, effectiveAppTags));
     const usesNativeActions = Boolean(toolsEnabled && nativeToolProtocolForConfig(config));
+    // 鱼声演出指南：角色绑定了鱼声 (FishAudio) 语音配置时才提供指南文本，教 AI 在台词里
+    // 直接写鱼声官方方括号 cue（[laughing]/[sighing]/[soft]…）。MiniMax/OpenAI 角色不受影响。
+    // 传递路径：宏 {{fishVoiceActingGuide}} → 预设条目「▸ 鱼声语音演出指南」（可在预设编辑器里
+    // 自定义改写该条目）；条目未启用时走下方代码注入兜底。始终只有一份生效。
+    let fishVoiceActingGuideText = "";
+    let fishGuidePresetEnabled = false;
+    const voiceCfgForGuide = !promptProfile && resolvedAppId === "chat"
+        ? resolveVoiceConfig(character.id, resolvedAppId)
+        : null;
+    if (voiceCfgForGuide?.provider === "FishAudio") {
+        fishVoiceActingGuideText = getFishVoiceActingGuide();
+        const fishGuidePrompt = preset?.prompts.find(p => p.identifier === "fish_voice_acting_guide");
+        fishGuidePresetEnabled = fishGuidePrompt ? isPresetPromptEnabled(fishGuidePrompt, preset?.prompt_order) : false;
+    }
     const { recentBlocks, truncatedHistory, wbActivationContext, unifiedRecentItems } = prepareShortTermContext(character.id, resolvedAppId, {
         history: historyForPrompt,
         includeDirectChatEntries: isOfflineMode,
@@ -1951,17 +1965,16 @@ export async function buildChatPromptMessages(
         offlineBilingualInstruction,
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,
+        fishVoiceActingGuide: fishVoiceActingGuideText,
     });
-    // 鱼声演出指南：角色绑定了鱼声 (FishAudio) 语音配置时才注入，教 AI 在台词里
-    // 直接写鱼声官方方括号 cue（[laughing]/[sighing]/[soft]…）。MiniMax/OpenAI 角色不受影响。
-    if (!promptProfile && resolvedAppId === "chat") {
-        const voiceCfg = resolveVoiceConfig(character.id, resolvedAppId);
-        if (voiceCfg?.provider === "FishAudio") {
-            llmMessages.push({
-                role: "system",
-                content: getFishVoiceActingGuide(),
-            });
-        }
+    // 鱼声演出指南兜底注入：预设「▸ 鱼声语音演出指南」条目启用时，指南文本已通过
+    // {{fishVoiceActingGuide}} 宏在条目位置展开（见 assemblePromptPayload 入参），
+    // 这里不再重复注入——始终只有一份生效。条目未启用/缺失时走代码注入兜底。
+    if (!promptProfile && resolvedAppId === "chat" && fishVoiceActingGuideText && !fishGuidePresetEnabled) {
+        llmMessages.push({
+            role: "system",
+            content: fishVoiceActingGuideText,
+        });
     }
     if (promptProfile?.output === "plain_text") {
         llmMessages.push({
