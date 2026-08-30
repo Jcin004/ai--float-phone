@@ -1,11 +1,15 @@
 import { saveThemeAssetFromBlob, getThemeAssetDataUrl, deleteThemeAsset } from "./theme-storage";
 
-export type VoiceFavoriteSource = "chat" | "call" | "date";
+export type VoiceFavoriteSource = "chat" | "call" | "date" | "story";
 
 export interface VoiceFavorite {
     id: string;
     source: VoiceFavoriteSource;
     sourceKey: string;
+    /** 原消息所在会话，跳转回原文用 */
+    sessionId?: string;
+    /** 是否带音频；纯文字收藏没有音频 */
+    hasAudio?: boolean;
     charId: string;
     charName: string;
     sourceTimestamp: number;
@@ -17,7 +21,8 @@ export interface VoiceFavorite {
 }
 
 export interface SaveVoiceFavoriteInput extends Omit<VoiceFavorite, "id" | "favoritedAt"> {
-    blob: Blob;
+    /** 音频快照；纯文字收藏没有音频，可省略 */
+    blob?: Blob;
 }
 
 const STORAGE_KEY = "ai_phone_voice_favorites_v2";
@@ -52,20 +57,22 @@ export async function getVoiceFavorite(source: VoiceFavoriteSource, sourceKey: s
 
 // 保存收藏
 export async function saveVoiceFavorite(input: SaveVoiceFavoriteInput): Promise<VoiceFavorite> {
-    if (!(input.blob instanceof Blob) || input.blob.size <= 0) {
-        throw new Error("语音文件为空");
-    }
+    const hasAudio = input.blob instanceof Blob && input.blob.size > 0;
 
     const id = `${input.source}_${input.sourceKey}`;
     const now = Date.now();
     
     // 1. 将音频 Blob 存入 theme_db 换取持久化引用 ID（底层是 dataUrl）
-    const audioAssetId = await saveThemeAssetFromBlob(input.blob, "voice_msg" as any, `voice_fav_${id}`);
+    const audioAssetId = hasAudio
+        ? await saveThemeAssetFromBlob(input.blob as Blob, "voice_msg" as any, `voice_fav_${id}`)
+        : undefined;
 
     const favorite: VoiceFavorite = {
         id,
         source: input.source,
         sourceKey: input.sourceKey,
+        sessionId: input.sessionId,
+        hasAudio,
         charId: input.charId,
         charName: input.charName || "未知角色",
         sourceTimestamp: input.sourceTimestamp || now,
@@ -116,5 +123,6 @@ export function voiceFavoriteSourceLabel(source: VoiceFavoriteSource): string {
         chat: "聊天",
         call: "通话",
         date: "见面",
+        story: "剧情",
     }[source];
 }

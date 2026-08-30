@@ -75,6 +75,7 @@ import {
 } from "@/lib/generated-image-retry";
 import { scrollElementWithinContainer } from "@/lib/dom-scroll";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
+import { FavoritesPortal } from "./VoiceFavoritesPortal";
 import { ChatScreenEffectOverlay, type ActiveScreenEffect } from "./chat-screen-effect";
 import {
     formatChatDiceResultMessage,
@@ -4543,6 +4544,43 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         }
     };
 
+    const [showVoiceFavorites, setShowVoiceFavorites] = useState(false);
+
+    // 收藏消息：文字存快照原文，语音把音频一起存进快照（原消息删除后收藏不变）
+    const handleFavoriteMessage = async (m: ChatMessage) => {
+        setActiveMessageId(null);
+        try {
+            const { saveVoiceFavorite } = await import("@/lib/voice-favorites");
+            const isVoice = m.mediaType === "audio";
+            let blob: Blob | undefined;
+            if (isVoice && m.mediaUrl) {
+                let url = m.mediaUrl;
+                if (url.startsWith("media-store://")) {
+                    const { loadMediaObjectUrl } = await import("@/lib/media-cache-storage");
+                    const objUrl = await loadMediaObjectUrl(url);
+                    if (objUrl) url = objUrl;
+                }
+                if (!url.startsWith("media-store://")) {
+                    blob = await fetch(url).then(r => r.blob()).catch(() => undefined);
+                }
+            }
+            await saveVoiceFavorite({
+                source: "chat",
+                sourceKey: m.id,
+                sessionId: session.id,
+                charId: m.senderCharacterId || session.contactId,
+                charName: m.senderName || (m.role === "user" ? (userIdentity?.name || "你") : (character?.name || "对方")),
+                sourceTimestamp: new Date(m.createdAt).getTime(),
+                originalText: isVoice ? (m.mediaData?.label || "") : m.content,
+                translation: m.mediaData?.translation,
+                blob,
+            });
+            showChatToast("已收藏");
+        } catch (err) {
+            showChatToast(err instanceof Error ? err.message : "收藏失败");
+        }
+    };
+
     const handleDeleteMessage = (msgId: string) => {
         if (isTransientMessage(msgId)) {
             removeTransientMessage(msgId);
@@ -4638,6 +4676,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         }
                         setActiveMessageId(null);
                     }} className="ctx-menu-btn">复制</button>
+                    <button onClick={() => { void handleFavoriteMessage(m); }} className="ctx-menu-btn">收藏</button>
                     <button onClick={() => (m.role === "assistant" ? handleEditResponseStart(m) : handleEditMessageStart(m))} className="ctx-menu-btn">
                         {m.role === "assistant" && (m.rawResponseText || m.editableResponseText) ? "编辑回复" : "编辑"}
                     </button>
@@ -6010,6 +6049,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 />
             )}
 
+            {/* 收藏夹面板：跳转回原文后关闭 */}
+            {showVoiceFavorites && wrapperRef.current?.parentElement && createPortal(
+                <FavoritesPortal
+                    onClose={() => setShowVoiceFavorites(false)}
+                    onJumpToMessage={(_charId: string, messageId: string) => { setShowVoiceFavorites(false); jumpToStoredMessage(messageId); }}
+                />,
+                wrapperRef.current.parentElement
+            )}
             {/* Settings Panel — portaled outside session-scoped CSS, preserves chat room mount */}
             {showSettings && wrapperRef.current?.parentElement && createPortal(
                 <div className="chat-settings-layer absolute inset-0 z-50">
